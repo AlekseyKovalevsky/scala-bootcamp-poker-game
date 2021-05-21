@@ -1,5 +1,7 @@
 package akovalevsky.scalabootcamp.poker.gameengine
 
+import akovalevsky.scalabootcamp.poker.gameengine.Common._
+
 import scala.util.Random
 
 object Cards {
@@ -60,6 +62,16 @@ object Cards {
   }
 
   final case class Card(rank: Rank, suit: Suit)
+
+  final case class Hand private(cards: List[Card])
+
+  object Hand {
+    def create(cards: List[Card]): Either[Error, Hand] =
+      if (cards.length == 5)
+        Right(new Hand(cards))
+      else
+        Left("Hand must contain 5 cards.".error)
+  }
 
   object Deck {
     def shuffle: List[Card] = {
