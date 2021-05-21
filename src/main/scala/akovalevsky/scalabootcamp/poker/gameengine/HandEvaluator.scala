@@ -1,6 +1,6 @@
 package akovalevsky.scalabootcamp.poker.gameengine
 
-import akovalevsky.scalabootcamp.poker.gameengine.Cards.{Card, Rank, Suit}
+import akovalevsky.scalabootcamp.poker.gameengine.Cards._
 
 import scala.collection.SortedMap
 import cats.syntax.all._
@@ -85,12 +85,12 @@ object HandEvaluator {
       _ <- flush(suitCounts)
     } yield Combination.StraightFlush
 
-  def evaluateHand(hand: List[Card]): HandEvaluationResult = {
+  def evaluateHand(hand: Hand): HandEvaluationResult = {
     val rankCounts: Map[Rank, Int] =
-      Rank.all.map(_ -> 0).toMap |+| hand.groupBy(_.rank).transform((_, cards) => cards.length)
+      Rank.all.map(_ -> 0).toMap |+| hand.cards.groupBy(_.rank).transform((_, cards) => cards.length)
 
     val rankCountsSorted: SortedMap[Rank, Int] = SortedMap.from(rankCounts)
-    val suitCounts: Map[Suit, Int] = hand.groupBy(_.suit).transform((_, cards) => cards.length)
+    val suitCounts: Map[Suit, Int] = hand.cards.groupBy(_.suit).transform((_, cards) => cards.length)
 
     val highestCombination = straightFlush(rankCountsSorted, suitCounts) orElse
       aceLowStraightFlush(rankCountsSorted, suitCounts) orElse
@@ -108,7 +108,7 @@ object HandEvaluator {
     def log2(x: Double): Double = math.log(x) / math.log(2)
 
     val bitsToEncodeRank = log2(Rank.values.values.max).floor.toInt
-    val handCardsScore = hand
+    val handCardsScore = hand.cards
       .map(_.rank)
       .sortBy(rank => (rankCounts(rank), Rank.value(rank)))
       .map(rank => Rank.value(rank))
@@ -122,17 +122,27 @@ object HandEvaluator {
   }
 
   def main(args: Array[String]): Unit = {
-    println(evaluateHand(List(
-      Card(Rank.Ace, Suit.Clubs), Card(Rank.Queen, Suit.Clubs),
-      Card(Rank.Jack, Suit.Clubs), Card(Rank.Ten, Suit.Clubs), Card(Rank.King, Suit.Clubs))))
+    println(for {
+      hand <- Hand.create(List(
+        Card(Rank.Ace, Suit.Clubs), Card(Rank.Queen, Suit.Clubs),
+        Card(Rank.Jack, Suit.Clubs), Card(Rank.Ten, Suit.Clubs), Card(Rank.King, Suit.Clubs)))
+      evaluationResult <- evaluateHand(hand).asRight[Error]
+    } yield evaluationResult)
 
-    println(evaluateHand(List(
-      Card(Rank.Ace, Suit.Clubs), Card(Rank.Two, Suit.Diamonds),
-      Card(Rank.Three, Suit.Clubs), Card(Rank.Four, Suit.Hearts), Card(Rank.Five, Suit.Clubs))))
 
-    println(evaluateHand(List(
-      Card(Rank.Ace, Suit.Clubs), Card(Rank.Seven, Suit.Diamonds),
-      Card(Rank.Three, Suit.Clubs), Card(Rank.Four, Suit.Hearts), Card(Rank.Five, Suit.Clubs))))
+    println(for {
+      hand <- Hand.create(List(
+        Card(Rank.Ace, Suit.Clubs), Card(Rank.Two, Suit.Diamonds),
+        Card(Rank.Three, Suit.Clubs), Card(Rank.Four, Suit.Hearts), Card(Rank.Five, Suit.Clubs)))
+      evaluationResult <- evaluateHand(hand).asRight[Error]
+    } yield evaluationResult)
+
+    println(for {
+      hand <- Hand.create(List(
+        Card(Rank.Ace, Suit.Clubs), Card(Rank.Seven, Suit.Diamonds),
+        Card(Rank.Three, Suit.Clubs), Card(Rank.Four, Suit.Hearts), Card(Rank.Five, Suit.Clubs)))
+      evaluationResult <- evaluateHand(hand).asRight[Error]
+    } yield evaluationResult)
   }
 
 }

@@ -1,20 +1,25 @@
 package akovalevsky.scalabootcamp.poker.gameengine
 
-import cats.data.{NonEmptySet, Validated, ValidatedNec}
+import cats.data.ValidatedNec
 import cats.syntax.all._
+import akovalevsky.scalabootcamp.poker.gameengine.Common._
 
 import java.util.UUID
 
 object Betting {
 
-  object TexasLimitHoldemSettings {
-    // stake must be equal to the small stake or the big stake depending on the round number
-    val stake = 10
-    val minPlayerCount = 2
-    val maxPlayerCount = 9
+  trait LimitHoldemRoundSettings {
+    val stake: Int
+    val minPlayerCount: Int
+    val maxPlayerCount: Int
   }
 
-  type Error = String
+
+  /*implicit val defaultSettings: LimitHoldemRoundSettings = new LimitHoldemRoundSettings {
+    override val stake: Int = 10
+    override val minPlayerCount: Int = 2
+    override val maxPlayerCount: Int = 9
+  }*/
 
   case class BettingPlayer(id: UUID) extends AnyVal
 
@@ -23,143 +28,136 @@ object Betting {
                                    currentBettingPlayer: BettingPlayer,
                                    betAmountsByPlayer: Map[BettingPlayer, Int],
                                    isCompleted: Boolean
-                                 ) {
-    private def getNextBettingPlayer(players: List[BettingPlayer], prevPlayer: BettingPlayer): BettingPlayer = {
-      val nextBettingPlayerIdx = (players.indexOf(prevPlayer) + 1) % players.length
+                                 )(implicit settings: LimitHoldemRoundSettings) {
+    private def nextBettingPlayer: BettingPlayer = {
+      val nextBettingPlayerIdx = (activePlayers.indexOf(currentBettingPlayer) + 1) % activePlayers.length
 
-      players(nextBettingPlayerIdx)
+      activePlayers(nextBettingPlayerIdx)
     }
 
-    private def switchNextBettingPlayer(round: BettingRound): BettingRound =
-      round.copy(currentBettingPlayer = getNextBettingPlayer(round.activePlayers, round.currentBettingPlayer))
+    private def switchNextBettingPlayer: BettingRound =
+      copy(currentBettingPlayer = nextBettingPlayer)
 
-    private def tryCompleteRound(round: BettingRound): BettingRound =
-      if (round.currentBettingPlayer == round.activePlayers.head &&
-        round.betAmountsByPlayer.values.forall(_ == round.betAmountsByPlayer.values.head))
-        round.copy(isCompleted = true)
+    private def tryComplete: BettingRound =
+      if (currentBettingPlayer == activePlayers.head &&
+        betAmountsByPlayer.values.forall(_ == betAmountsByPlayer.values.head))
+        copy(isCompleted = true)
       else
-        round.copy()
+        this
 
-    private def makeBlinds(): BettingRound = {
-      val smallBlindPlayer = this.currentBettingPlayer
-      val bigBlindPlayer = getNextBettingPlayer(this.activePlayers, this.currentBettingPlayer)
+    private def makeBlinds: BettingRound = {
+      val smallBlindPlayer = currentBettingPlayer
+      val bigBlindPlayer = nextBettingPlayer
 
-      this.copy(
-        currentBettingPlayer = getNextBettingPlayer(this.activePlayers, bigBlindPlayer),
-        betAmountsByPlayer = betAmountsByPlayer +
-          (smallBlindPlayer -> TexasLimitHoldemSettings.stake / 2) +
-          (bigBlindPlayer -> TexasLimitHoldemSettings.stake))
+      switchNextBettingPlayer.switchNextBettingPlayer
+        .copy(betAmountsByPlayer = betAmountsByPlayer +
+          (smallBlindPlayer -> settings.stake / 2) +
+          (bigBlindPlayer -> settings.stake))
     }
 
-    private def validateIsNotCompleted(round: BettingRound): Either[Error, BettingRound] =
-      if (!round.isCompleted)
-        Right(round.copy())
+    private def validateIsNotCompleted: Either[Error, BettingRound] =
+      if (!isCompleted)
+        Right(this)
       else
-        Left("Unable to act. The round is completed.")
+        Left("Unable to act. The round is completed.".error)
 
-    private def validateNoBetsMade(round: BettingRound): Either[Error, BettingRound] =
-      if (round.betAmountsByPlayer.isEmpty)
-        Right(round.copy())
+    private def validateNoBetsMade: Either[Error, BettingRound] =
+      if (betAmountsByPlayer.isEmpty)
+        Right(this)
       else
-        Left("Unable to act. There are bets made.")
+        Left("Unable to act. There are bets made.".error)
 
-    private def validateNoHigherBets(round: BettingRound): Either[Error, BettingRound] = {
+    private def validateNoHigherBets: Either[Error, BettingRound] = {
       val highestBet = betAmountsByPlayer.values.max
-      val currentPlayerBet = betAmountsByPlayer(round.currentBettingPlayer)
+      val currentPlayerBet = betAmountsByPlayer(currentBettingPlayer)
 
       if (highestBet == currentPlayerBet)
-        Right(round.copy())
+        Right(this)
       else
-        Left("Unable to act. There is a higher bet made.")
+        Left("Unable to act. There is a higher bet made.".error)
     }
 
-    def check(): Either[Error, BettingRound] =
+    def check: Either[Error, BettingRound] =
       for {
-        round <- validateIsNotCompleted(this)
-        round <- validateNoBetsMade(round)
-        round <- switchNextBettingPlayer(round).asRight[Error]
-        round <- tryCompleteRound(round).asRight[Error]
-      } yield round
+        round <- validateIsNotCompleted
+        round <- round.validateNoBetsMade
+      } yield round.switchNextBettingPlayer.tryComplete
 
-    private def call(round: BettingRound): BettingRound = {
-      val highestBet: Int = round.betAmountsByPlayer.values.max
-      this.copy(
-        betAmountsByPlayer = round.betAmountsByPlayer + (round.currentBettingPlayer -> highestBet))
+    private def callHighestBet: BettingRound = {
+      val highestBet: Int = betAmountsByPlayer.values.max
+      copy(
+        betAmountsByPlayer = betAmountsByPlayer + (currentBettingPlayer -> highestBet))
     }
 
-    def call(): Either[Error, BettingRound] =
+    def call: Either[Error, BettingRound] =
       for {
-        round <- validateIsNotCompleted(this)
-        round <- validateNoHigherBets(round)
-        round <- call(round).asRight[Error]
-        round <- switchNextBettingPlayer(round).asRight[Error]
-        round <- tryCompleteRound(round).asRight[Error]
-      } yield round
+        round <- validateIsNotCompleted
+        round <- round.validateNoHigherBets
+      } yield round.callHighestBet.switchNextBettingPlayer.tryComplete
 
 
-    private def raise(round: BettingRound): BettingRound = {
-      val highestBet: Int = round.betAmountsByPlayer.values.max
-      this.copy(
-        betAmountsByPlayer = round.betAmountsByPlayer + (round.currentBettingPlayer -> (highestBet + TexasLimitHoldemSettings.stake)))
+    private def raiseToHighestBet: BettingRound = {
+      val highestBet: Int = betAmountsByPlayer.values.max
+      copy(
+        betAmountsByPlayer = betAmountsByPlayer + (currentBettingPlayer -> (highestBet + settings.stake)))
     }
 
-    def raise(): Either[Error, BettingRound] =
+    def raise: Either[Error, BettingRound] =
       for {
-        round <- validateIsNotCompleted(this)
-        round <- raise(round).asRight[Error]
-        round <- switchNextBettingPlayer(round).asRight[Error]
-      } yield round
+        round <- validateIsNotCompleted
+      } yield round.raiseToHighestBet.switchNextBettingPlayer
 
-    private def removeCurrentBettingPlayer(round: BettingRound): BettingRound = {
-      round.copy(
-        activePlayers = round.activePlayers.filterNot(_ == round.currentBettingPlayer),
-        currentBettingPlayer = getNextBettingPlayer(round.activePlayers, round.currentBettingPlayer))
-    }
+    private def withoutCurrentBettingPlayer: BettingRound =
+      copy(
+        activePlayers = activePlayers.filterNot(_ == currentBettingPlayer),
+        currentBettingPlayer = nextBettingPlayer)
 
-    def fold(): Either[Error, BettingRound] =
+    def fold: Either[Error, BettingRound] =
       for {
-        round <- validateIsNotCompleted(this)
-        round <- removeCurrentBettingPlayer(round).asRight[Error]
-        round <- tryCompleteRound(round).asRight[Error]
-      } yield round
+        round <- validateIsNotCompleted
+      } yield round.withoutCurrentBettingPlayer.tryComplete
   }
 
   object BettingRound {
-    def validateMinPlayerCount(players: List[BettingPlayer]): ValidatedNec[Error, List[BettingPlayer]] =
-      if (players.length < TexasLimitHoldemSettings.minPlayerCount)
+    private def validateMinPlayerCount(players: List[BettingPlayer])
+                                      (implicit gameSettings: LimitHoldemRoundSettings): ValidatedNec[Error, List[BettingPlayer]] =
+      if (players.length < gameSettings.minPlayerCount)
         players.validNec
       else
-        "Can't create the betting round: two or more players can play.".invalidNec
+        "Can't create the betting round: two or more players can play.".error.invalidNec
 
-    def validateMaxPlayerCount(players: List[BettingPlayer]): ValidatedNec[Error, List[BettingPlayer]] =
-      if (players.length > TexasLimitHoldemSettings.maxPlayerCount)
+    private def validateMaxPlayerCount(players: List[BettingPlayer])
+                                      (implicit gameSettings: LimitHoldemRoundSettings): ValidatedNec[Error, List[BettingPlayer]] =
+      if (players.length > gameSettings.maxPlayerCount)
         players.validNec
       else
-        "Can't create the betting round: two or more players can play.".invalidNec
+        "Can't create the betting round: two or more players can play.".error.invalidNec
 
-    def validateCurrentPlayerAmongActive(player: BettingPlayer, activePlayers: List[BettingPlayer]): ValidatedNec[Error, BettingPlayer] =
+    private def validateCurrentPlayerAmongActive(player: BettingPlayer, activePlayers: List[BettingPlayer]): ValidatedNec[Error, BettingPlayer] =
       if (activePlayers.contains(player))
         player.validNec
       else
-        "Can't create the betting round: the current betting player unknown.".invalidNec
+        "Can't create the betting round: the current betting player unknown.".error.invalidNec
 
-    def create(activePlayers: List[BettingPlayer], currentBettingPlayer: BettingPlayer): ValidatedNec[Error, BettingRound] = {
+    def create(activePlayers: List[BettingPlayer], currentBettingPlayer: BettingPlayer)
+              (implicit gameSettings: LimitHoldemRoundSettings):
+    ValidatedNec[Error, BettingRound] = {
       val activePlayersValidated = validateMinPlayerCount(activePlayers) *> validateMaxPlayerCount(activePlayers)
       val currentBettingPlayerValidated = validateCurrentPlayerAmongActive(currentBettingPlayer, activePlayers)
 
       (activePlayersValidated, currentBettingPlayerValidated).mapN {
         case (activePlayers, currentBettingPlayer) =>
           val bets = activePlayers.map(_ -> 0).toMap
-          new BettingRound(activePlayers, currentBettingPlayer, bets, false)
+          new BettingRound(activePlayers, currentBettingPlayer, bets, false)(gameSettings)
       }
     }
 
-    def createWithBlinds(activePlayers: List[BettingPlayer], currentBettingPlayer: BettingPlayer): ValidatedNec[Error, BettingRound] =
+    def createWithBlinds(activePlayers: List[BettingPlayer], currentBettingPlayer: BettingPlayer)
+                        (implicit gameSettings: LimitHoldemRoundSettings): ValidatedNec[Error, BettingRound] =
       for {
         round <- create(activePlayers, currentBettingPlayer)
-      } yield round.makeBlinds()
+      } yield round.makeBlinds
   }
 
 }
-
 
