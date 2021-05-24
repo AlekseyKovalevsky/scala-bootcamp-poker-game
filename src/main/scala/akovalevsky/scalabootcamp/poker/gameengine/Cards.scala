@@ -73,14 +73,36 @@ object Cards {
         Left("Hand must contain 5 cards.".error)
   }
 
+  final case class Pocket private(cards: List[Card])
+
+  object Pocket {
+    def create(cards: List[Card]): Either[Error, Pocket] =
+      if (cards.length == 2)
+        Right(new Pocket(cards))
+      else
+        Left("Pocket must contain 2 cards.".error)
+  }
+
+  final case class Board private(cards: List[Card])
+
+  object Board {
+    def create(cards: List[Card]): Either[Error, Board] =
+      if (cards.length >= 3 && cards.length <= 5)
+        Right(new Board(cards))
+      else
+        Left("Board must contain 3 to 5 cards.".error)
+  }
+
+  case class Deck private(cards: List[Card])
+
   object Deck {
-    def shuffle: List[Card] = {
+    def shuffle: Deck = {
       val cards = for {
         rank <- Rank.all
         suit <- Suit.all
       } yield Card(rank, suit)
 
-      Random.shuffle(cards)
+      new Deck(Random.shuffle(cards))
     }
   }
 

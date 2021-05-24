@@ -43,47 +43,55 @@ object HandEvaluator {
 
   }
 
-  case class HandEvaluationResult(combination: Combination, score: Int)
+  final case class HandEvaluationResult(hand: Hand, combination: Combination, score: Int)
 
-  def pair(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
+  private def pair(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
     Option.when(rankCounts.values.count(_ == 2) == 1)(Combination.Pair)
 
-  def twoPairs(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
+  private def twoPairs(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
     Option.when(rankCounts.values.count(_ == 2) == 2)(Combination.TwoPairs)
 
-  def threeOfAKind(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
+  private def threeOfAKind(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
     Option.when(rankCounts.values.exists(_ == 3))(Combination.ThreeOfAKind)
 
-  def aceLowStraight(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
+  private def aceLowStraight(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
     Option.when(
       rankCounts(Rank.Ace) == 1 && rankCounts.values.takeWhile(_ == 1).toList.length == 4)(Combination.AceLowStraight)
 
-  def straight(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
+  private def straight(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
     Option.when(rankCounts.values.dropWhile(_ != 1).takeWhile(_ == 1).toList.length == 5)(Combination.Straight)
 
-  def flush(suitCounts: Map[Suit, Int]): Option[Combination] =
+  private def flush(suitCounts: Map[Suit, Int]): Option[Combination] =
     Option.when(suitCounts.values.exists(_ == 5))(Combination.Flush)
 
-  def fullHouse(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
+  private def fullHouse(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
     for {
       _ <- pair(rankCounts)
       _ <- threeOfAKind(rankCounts)
     } yield Combination.FullHouse
 
-  def fourOfAKind(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
+  private def fourOfAKind(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
     Option.when(rankCounts.values.exists(_ == 4))(Combination.FourOfAKind)
 
-  def aceLowStraightFlush(rankCounts: SortedMap[Rank, Int], suitCounts: Map[Suit, Int]): Option[Combination] =
+  private def aceLowStraightFlush(rankCounts: SortedMap[Rank, Int], suitCounts: Map[Suit, Int]): Option[Combination] =
     for {
       _ <- aceLowStraight(rankCounts)
       _ <- flush(suitCounts)
     } yield Combination.AceLowStraightFlush
 
-  def straightFlush(rankCounts: SortedMap[Rank, Int], suitCounts: Map[Suit, Int]): Option[Combination] =
+  private def straightFlush(rankCounts: SortedMap[Rank, Int], suitCounts: Map[Suit, Int]): Option[Combination] =
     for {
       _ <- straight(rankCounts)
       _ <- flush(suitCounts)
     } yield Combination.StraightFlush
+
+  def findBestHand(pocket: Pocket, board: Board): HandEvaluationResult =
+    pocket.cards.concat(board.cards)
+      .toSet
+      .subsets(5)
+      .map(x => Hand(x.toList))
+      .map(evaluateHand)
+      .maxBy(_.score)
 
   def evaluateHand(hand: Hand): HandEvaluationResult = {
     val rankCounts: Map[Rank, Int] =
@@ -118,7 +126,7 @@ object HandEvaluator {
 
     val handScore = (highestCombinationScore << bitsToEncodeRank * 5) | handCardsScore
 
-    HandEvaluationResult(highestCombination, handScore)
+    HandEvaluationResult(hand, highestCombination, handScore)
   }
 
   def main(args: Array[String]): Unit = {

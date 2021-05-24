@@ -4,32 +4,39 @@ import cats.data.ValidatedNec
 import cats.syntax.all._
 import akovalevsky.scalabootcamp.poker.gameengine.Common._
 
-import java.util.UUID
-
 object Betting {
 
-  trait LimitHoldemRoundSettings {
-    val stake: Int
-    val minPlayerCount: Int
-    val maxPlayerCount: Int
+  trait BettingRoundName
+
+  object BettingRoundName {
+
+    case object Preflop extends BettingRoundName
+
+    case object Flop extends BettingRoundName
+
+    case object Turn extends BettingRoundName
+
+    case object River extends BettingRoundName
+
   }
 
+  final case class BettingRound private(
+                                         name: BettingRoundName,
+                                         activePlayers: List[Player],
+                                         currentBettingPlayer: Player,
+                                         betAmountsByPlayer: Map[Player, Int],
+                                         isCompleted: Boolean
+                                       )(implicit settings: LimitHoldemSettings) {
+    private def activePlayerBets: List[Int] = activePlayers.map(betAmountsByPlayer(_))
 
-  /*implicit val defaultSettings: LimitHoldemRoundSettings = new LimitHoldemRoundSettings {
-    override val stake: Int = 10
-    override val minPlayerCount: Int = 2
-    override val maxPlayerCount: Int = 9
-  }*/
+    private def currentStake: Int = name match {
+      case BettingRoundName.Preflop => settings.lowerLimit
+      case BettingRoundName.Flop => settings.lowerLimit
+      case BettingRoundName.Turn => settings.higherLimit
+      case BettingRoundName.River => settings.higherLimit
+    }
 
-  case class BettingPlayer(id: UUID) extends AnyVal
-
-  case class BettingRound private(
-                                   activePlayers: List[BettingPlayer],
-                                   currentBettingPlayer: BettingPlayer,
-                                   betAmountsByPlayer: Map[BettingPlayer, Int],
-                                   isCompleted: Boolean
-                                 )(implicit settings: LimitHoldemRoundSettings) {
-    private def nextBettingPlayer: BettingPlayer = {
+    private def nextBettingPlayer: Player = {
       val nextBettingPlayerIdx = (activePlayers.indexOf(currentBettingPlayer) + 1) % activePlayers.length
 
       activePlayers(nextBettingPlayerIdx)
@@ -40,7 +47,7 @@ object Betting {
 
     private def tryComplete: BettingRound =
       if (currentBettingPlayer == activePlayers.head &&
-        betAmountsByPlayer.values.forall(_ == betAmountsByPlayer.values.head))
+        activePlayerBets.forall(_ == activePlayerBets.head))
         copy(isCompleted = true)
       else
         this
@@ -51,8 +58,8 @@ object Betting {
 
       switchNextBettingPlayer.switchNextBettingPlayer
         .copy(betAmountsByPlayer = betAmountsByPlayer +
-          (smallBlindPlayer -> settings.stake / 2) +
-          (bigBlindPlayer -> settings.stake))
+          (smallBlindPlayer -> currentStake / 2) +
+          (bigBlindPlayer -> currentStake))
     }
 
     private def validateIsNotCompleted: Either[Error, BettingRound] =
@@ -61,13 +68,7 @@ object Betting {
       else
         Left("Unable to act. The round is completed.".error)
 
-    private def validateNoBetsMade: Either[Error, BettingRound] =
-      if (betAmountsByPlayer.isEmpty)
-        Right(this)
-      else
-        Left("Unable to act. There are bets made.".error)
-
-    private def validateNoHigherBets: Either[Error, BettingRound] = {
+    private def validateNoHigherBet: Either[Error, BettingRound] = {
       val highestBet = betAmountsByPlayer.values.max
       val currentPlayerBet = betAmountsByPlayer(currentBettingPlayer)
 
@@ -77,13 +78,23 @@ object Betting {
         Left("Unable to act. There is a higher bet made.".error)
     }
 
+    private def validateHigherBetExist: Either[Error, BettingRound] = {
+      val highestBet = betAmountsByPlayer.values.max
+      val currentPlayerBet = betAmountsByPlayer(currentBettingPlayer)
+
+      if (highestBet > currentPlayerBet)
+        Right(this)
+      else
+        Left("Unable to act. There is no higher bet made.".error)
+    }
+
     def check: Either[Error, BettingRound] =
       for {
         round <- validateIsNotCompleted
-        round <- round.validateNoBetsMade
+        round <- round.validateNoHigherBet
       } yield round.switchNextBettingPlayer.tryComplete
 
-    private def callHighestBet: BettingRound = {
+    private def doCall: BettingRound = {
       val highestBet: Int = betAmountsByPlayer.values.max
       copy(
         betAmountsByPlayer = betAmountsByPlayer + (currentBettingPlayer -> highestBet))
@@ -92,20 +103,20 @@ object Betting {
     def call: Either[Error, BettingRound] =
       for {
         round <- validateIsNotCompleted
-        round <- round.validateNoHigherBets
-      } yield round.callHighestBet.switchNextBettingPlayer.tryComplete
+        round <- round.validateHigherBetExist
+      } yield round.doCall.switchNextBettingPlayer.tryComplete
 
 
-    private def raiseToHighestBet: BettingRound = {
+    private def doRaise: BettingRound = {
       val highestBet: Int = betAmountsByPlayer.values.max
       copy(
-        betAmountsByPlayer = betAmountsByPlayer + (currentBettingPlayer -> (highestBet + settings.stake)))
+        betAmountsByPlayer = betAmountsByPlayer + (currentBettingPlayer -> (highestBet + currentStake)))
     }
 
     def raise: Either[Error, BettingRound] =
       for {
         round <- validateIsNotCompleted
-      } yield round.raiseToHighestBet.switchNextBettingPlayer
+      } yield round.doRaise.switchNextBettingPlayer
 
     private def withoutCurrentBettingPlayer: BettingRound =
       copy(
@@ -119,45 +130,40 @@ object Betting {
   }
 
   object BettingRound {
-    private def validateMinPlayerCount(players: List[BettingPlayer])
-                                      (implicit gameSettings: LimitHoldemRoundSettings): ValidatedNec[Error, List[BettingPlayer]] =
-      if (players.length < gameSettings.minPlayerCount)
+
+    private def validateMinPlayerCount(players: List[Player])
+                                      (implicit gameSettings: LimitHoldemSettings): ValidatedNec[Error, List[Player]] =
+      if (players.length >= gameSettings.minPlayerCount)
         players.validNec
       else
-        "Can't create the betting round: two or more players can play.".error.invalidNec
+        s"Error: ${gameSettings.minPlayerCount} or more players can play".error.invalidNec
 
-    private def validateMaxPlayerCount(players: List[BettingPlayer])
-                                      (implicit gameSettings: LimitHoldemRoundSettings): ValidatedNec[Error, List[BettingPlayer]] =
-      if (players.length > gameSettings.maxPlayerCount)
+    private def validateMaxPlayerCount(players: List[Player])
+                                      (implicit gameSettings: LimitHoldemSettings): ValidatedNec[Error, List[Player]] =
+      if (players.length <= gameSettings.maxPlayerCount)
         players.validNec
       else
-        "Can't create the betting round: two or more players can play.".error.invalidNec
+        s"Error: ${gameSettings.maxPlayerCount} or less players can play".error.invalidNec
 
-    private def validateCurrentPlayerAmongActive(player: BettingPlayer, activePlayers: List[BettingPlayer]): ValidatedNec[Error, BettingPlayer] =
-      if (activePlayers.contains(player))
-        player.validNec
-      else
-        "Can't create the betting round: the current betting player unknown.".error.invalidNec
-
-    def create(activePlayers: List[BettingPlayer], currentBettingPlayer: BettingPlayer)
-              (implicit gameSettings: LimitHoldemRoundSettings):
-    ValidatedNec[Error, BettingRound] = {
+    def create(
+                name: BettingRoundName,
+                activePlayers: List[Player])
+              (implicit gameSettings: LimitHoldemSettings):
+    Either[Error, BettingRound] = {
       val activePlayersValidated = validateMinPlayerCount(activePlayers) *> validateMaxPlayerCount(activePlayers)
-      val currentBettingPlayerValidated = validateCurrentPlayerAmongActive(currentBettingPlayer, activePlayers)
 
-      (activePlayersValidated, currentBettingPlayerValidated).mapN {
-        case (activePlayers, currentBettingPlayer) =>
-          val bets = activePlayers.map(_ -> 0).toMap
-          new BettingRound(activePlayers, currentBettingPlayer, bets, false)(gameSettings)
-      }
+      activePlayersValidated.map { activePlayers =>
+        val bets = activePlayers.map(_ -> 0).toMap
+        new BettingRound(name, activePlayers, activePlayers.head, bets, false)
+      }.toEither
+        .leftMap(errs => Error(errs.map(_.message).mkString_(";")))
     }
 
-    def createWithBlinds(activePlayers: List[BettingPlayer], currentBettingPlayer: BettingPlayer)
-                        (implicit gameSettings: LimitHoldemRoundSettings): ValidatedNec[Error, BettingRound] =
+    def createInitial(activePlayers: List[Player])
+                     (implicit gameSettings: LimitHoldemSettings): Either[Error, BettingRound] =
       for {
-        round <- create(activePlayers, currentBettingPlayer)
+        round <- create(BettingRoundName.Preflop, activePlayers)
       } yield round.makeBlinds
   }
 
 }
-
