@@ -1,8 +1,11 @@
 package akovalevsky.scalabootcamp.poker.gameengine
 
+import akovalevsky.scalabootcamp.poker.gameengine.Cards.Card._
+import akovalevsky.scalabootcamp.poker.gameengine.Cards.Rank._
+import akovalevsky.scalabootcamp.poker.gameengine.Cards.Suit._
 import akovalevsky.scalabootcamp.poker.gameengine.Common._
-
-import scala.util.Random
+import cats.effect.Sync
+import cats.syntax.all._
 
 object Cards {
 
@@ -10,13 +13,13 @@ object Cards {
 
   object Suit {
 
-    final case object Diamonds extends Suit
+    case object Diamonds extends Suit
 
-    final case object Clubs extends Suit
+    case object Clubs extends Suit
 
-    final case object Hearts extends Suit
+    case object Hearts extends Suit
 
-    final case object Spades extends Suit
+    case object Spades extends Suit
 
     val all: List[Suit] = List(Diamonds, Clubs, Hearts, Spades)
   }
@@ -32,36 +35,67 @@ object Cards {
 
     implicit val orderingForRank: Ordering[Rank] = (x: Rank, y: Rank) => values(x) - values(y)
 
-    final case object Ace extends Rank
+    case object Ace extends Rank
 
-    final case object King extends Rank
+    case object King extends Rank
 
-    final case object Queen extends Rank
+    case object Queen extends Rank
 
-    final case object Jack extends Rank
+    case object Jack extends Rank
 
-    final case object Ten extends Rank
+    case object Ten extends Rank
 
-    final case object Nine extends Rank
+    case object Nine extends Rank
 
-    final case object Eight extends Rank
+    case object Eight extends Rank
 
-    final case object Seven extends Rank
+    case object Seven extends Rank
 
-    final case object Six extends Rank
+    case object Six extends Rank
 
-    final case object Five extends Rank
+    case object Five extends Rank
 
-    final case object Four extends Rank
+    case object Four extends Rank
 
-    final case object Three extends Rank
+    case object Three extends Rank
 
-    final case object Two extends Rank
+    case object Two extends Rank
 
     val all: List[Rank] = List(Ace, King, Queen, Jack, Ten, Nine, Eight, Seven, Six, Five, Four, Three, Two)
   }
 
-  final case class Card(rank: Rank, suit: Suit)
+  final case class Card(rank: Rank, suit: Suit) {
+    override def toString: String = rankStr(rank) + suitStr(suit)
+  }
+
+  object Card {
+    implicit val orderingForCard: Ordering[Card] = Ordering[Rank].contramap[Card](_.rank)
+
+    private val suitStr = Map[Suit, String](
+      Diamonds -> "d",
+      Hearts -> "h",
+      Spades -> "s",
+      Clubs -> "c"
+    )
+
+    private val rankStr = Map[Rank, String](
+      Ace -> "A",
+      King -> "K",
+      Queen -> "Q",
+      Jack -> "J",
+      Ten -> "T",
+      Nine -> "9",
+      Eight -> "8",
+      Seven -> "7",
+      Six -> "6",
+      Five -> "5",
+      Four -> "4",
+      Three -> "3",
+      Two -> "3"
+    )
+
+    def toString(card: Card): String = rankStr(card.rank) + suitStr(card.suit)
+  }
 
   final case class Hand private(cards: List[Card])
 
@@ -96,14 +130,17 @@ object Cards {
   case class Deck private(cards: List[Card])
 
   object Deck {
-    def shuffle: Deck = {
-      val cards = for {
-        rank <- Rank.all
-        suit <- Suit.all
-      } yield Card(rank, suit)
-
-      new Deck(Random.shuffle(cards))
-    }
+    def shuffled[F[_] : Sync](shuffle: List[Card] => F[List[Card]]): F[Deck] =
+      for {
+        cards <- Sync[F].delay {
+          for {
+            rank <- Rank.all
+            suit <- Suit.all
+          } yield Card(rank, suit)
+        }
+        cardsShuffled <- shuffle(cards)
+      } yield new Deck(cardsShuffled)
   }
 
 }
+

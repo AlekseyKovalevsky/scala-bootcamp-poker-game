@@ -11,14 +11,14 @@ import scala.concurrent.duration.DurationInt
 object BotService {
   def of[F[_]](gameRoom: GameRoom[F], botPlayers: List[Player])
               (implicit S: Concurrent[F], T: Timer[F]): F[Unit] = {
-    val actInterval = 1.second
+    val actInterval = 5.seconds
 
     def act(gameRoomState: GameRoomState): F[Unit] = {
       val currentBettingPlayer = gameRoomState.game.currentBettingRound.currentBettingPlayer
 
       if (botPlayers.contains(currentBettingPlayer)) {
-        // add more complex logic. EitherT doesn't work as expected :(
-        (EitherT(gameRoom.call(currentBettingPlayer)) orElse
+        (EitherT(gameRoom.check(currentBettingPlayer)) orElse
+          EitherT(gameRoom.call(currentBettingPlayer)) orElse
           EitherT(gameRoom.fold(currentBettingPlayer))).value.void
       }
       else

@@ -68,6 +68,7 @@ object HandEvaluator {
     for {
       _ <- pair(rankCounts)
       _ <- threeOfAKind(rankCounts)
+      _ <- fourOfAKind(rankCounts)
     } yield Combination.FullHouse
 
   private def fourOfAKind(rankCounts: SortedMap[Rank, Int]): Option[Combination] =
@@ -128,29 +129,4 @@ object HandEvaluator {
 
     HandEvaluationResult(hand, highestCombination, handScore)
   }
-
-  def main(args: Array[String]): Unit = {
-    println(for {
-      hand <- Hand.create(List(
-        Card(Rank.Ace, Suit.Clubs), Card(Rank.Queen, Suit.Clubs),
-        Card(Rank.Jack, Suit.Clubs), Card(Rank.Ten, Suit.Clubs), Card(Rank.King, Suit.Clubs)))
-      evaluationResult <- evaluateHand(hand).asRight[Error]
-    } yield evaluationResult)
-
-
-    println(for {
-      hand <- Hand.create(List(
-        Card(Rank.Ace, Suit.Clubs), Card(Rank.Two, Suit.Diamonds),
-        Card(Rank.Three, Suit.Clubs), Card(Rank.Four, Suit.Hearts), Card(Rank.Five, Suit.Clubs)))
-      evaluationResult <- evaluateHand(hand).asRight[Error]
-    } yield evaluationResult)
-
-    println(for {
-      hand <- Hand.create(List(
-        Card(Rank.Ace, Suit.Clubs), Card(Rank.Seven, Suit.Diamonds),
-        Card(Rank.Three, Suit.Clubs), Card(Rank.Four, Suit.Hearts), Card(Rank.Five, Suit.Clubs)))
-      evaluationResult <- evaluateHand(hand).asRight[Error]
-    } yield evaluationResult)
-  }
-
 }
